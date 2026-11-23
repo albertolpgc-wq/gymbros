@@ -139,6 +139,9 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .profile .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .profile input { width: 100%; }
 .small { font-size: 12px; margin: 0; }
+.seg.sex { padding: 3px; }
+.seg.sex button { flex: 1; padding: 10px; font-size: 15px; }
+.seg.sex button.on { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
 /* HIIT */
 .steppers.one { grid-template-columns: 1fr; }
@@ -157,6 +160,12 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .step-pick span { flex: 1; }
 .step-pick button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 4px 9px; font-size: 13px; cursor: pointer; }
 .step-pick button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+
+/* iconos de grupos: Fluent Emoji 3D */
+.ga { width: 64px; height: 64px; display: block; object-fit: contain; margin: 4px 0 2px; filter: drop-shadow(0 4px 6px #0007); }
+.group .joke { color: var(--accent); font-size: 11px; line-height: 1.2; }
+.group:active .ga, .group:hover .ga { animation: flex .5s ease-in-out; }
+@keyframes flex { 30% { transform: scale(1.12) rotate(-4deg); } 60% { transform: scale(.96) rotate(3deg); } }
 
 /* ---------- grupos y ejercicios ---------- */
 .groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -179,6 +188,37 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .pict .body .head { fill: var(--text); stroke: none; }
 .pict .eq { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; opacity: .85; }
 .pict .eq .plate { fill: var(--accent); stroke: none; }
+.pict .eq line[stroke-width="5"] { stroke-width: 5; }
+.pict .eq .pad { fill: var(--accent); stroke: none; opacity: .35; }
+.pict .eq .cable { stroke-width: 1.5; stroke-dasharray: 3 2; }
+.pict .eq .burst1 { fill: #ff3d00; stroke: none; }
+.pict .eq .burst2 { fill: #ffc400; stroke: none; }
+.pict .mv text.x3 { fill: #fff; paint-order: stroke; stroke: #b71c00; stroke-width: 4px; }
+/* tarjeta "explosiva" (Triserie Cbum) */
+.ex-item.boom { border-color: #ff6d00; background: radial-gradient(circle at 12% 50%, #ff6d0055, transparent 55%), radial-gradient(circle at 95% 0%, #ffc40033, transparent 40%), var(--surface); }
+.ex-item.boom b { color: #ffb300; }
+.ex-item.boom .thumb { background: #2a0f00; animation: boom 1.6s ease-in-out infinite; }
+.media.boom { background: radial-gradient(circle, #ff6d0066, #2a0f00 70%); border-color: #ff6d00; }
+@keyframes boom { 0%, 100% { transform: scale(1) rotate(0); } 10% { transform: scale(1.08) rotate(-3deg); } 20% { transform: scale(1) rotate(3deg); } 30% { transform: scale(1.05) rotate(0); } }
+.pict .never { opacity: .45; }
+.pict .stamp rect { fill: none; stroke: #ff3b3b; stroke-width: 4; }
+.pict .stamp text { fill: #ff3b3b; font: 900 20px system-ui, sans-serif; letter-spacing: 1px; }
+.pict .stamp.always rect { stroke: #34d058; fill: #0f1115cc; }
+.pict .stamp.always text { fill: #34d058; font-size: 17px; }
+.pict .crown path { fill: #ffd54a; stroke: #8a6a00; stroke-width: 1; }
+.ex-item.always { border-color: #34d058; background: radial-gradient(circle at 12% 50%, #34d05833, transparent 55%), var(--surface); }
+.ex-item.always .joke { color: #34d058; font-style: italic; }
+.ex-item.always small { white-space: normal; }
+.pict .stamp.again rect { stroke: var(--orange); fill: #0f1115cc; }
+.pict .stamp.again text { fill: var(--orange); font-size: 15px; }
+.ex-item.again { border-color: var(--orange); background: repeating-linear-gradient(-45deg, transparent 0 14px, #ff9f1c10 14px 28px), var(--surface); }
+.ex-item.again .joke { color: var(--orange); font-style: italic; }
+.ex-item.again small { white-space: normal; }
+.ex-item.never { border-style: dashed; opacity: .85; }
+.ex-item.never .joke { color: #ff6b6b; font-style: italic; }
+.ex-item.never small { white-space: normal; }
+.pict .mv text { fill: var(--orange); stroke: none; font: 900 22px system-ui, sans-serif; }
+.pict .mv { fill: none; stroke: var(--orange); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .pict.big { width: 100%; height: 100%; }
 
 /* ---------- pantalla de ejercicio ---------- */
@@ -219,6 +259,7 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .stp { width: 44px; border: 0; background: var(--surface-2); font-size: 22px; cursor: pointer; touch-action: manipulation; }
 .stp:active { background: var(--accent); color: var(--accent-ink); }
 .stp-inp, .stepper output { flex: 1; min-width: 0; width: 100%; text-align: center; font-size: 24px; font-weight: 800; background: transparent; border: 0; padding: 10px 0; font-variant-numeric: tabular-nums; display: grid; place-items: center; }
+.mult-hint { margin: -4px 0 10px; color: #ffb300; }
 .toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; margin-bottom: 10px; }
 .toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
 .rest-opt { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
@@ -284,6 +325,13 @@ textarea { width: 100%; resize: vertical; }
 .presets { display: flex; gap: 8px; flex-wrap: wrap; }
 .presets .btn { flex: 1; }
 .int-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 6px; }
+
+/* caminata GPS */
+.walk { border-color: var(--blue); }
+.walk-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; margin: 6px 0 12px; }
+.walk-stats b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+.walk-stats span { font-size: 12px; color: var(--muted); }
+.walkbar { position: fixed; left: 50%; transform: translateX(-50%); top: calc(64px + var(--safe-t)); z-index: 9; background: var(--blue); color: #001a33; border-radius: 99px; padding: 6px 14px; font-weight: 700; font-size: 13px; box-shadow: 0 6px 20px #0008; white-space: nowrap; }
 
 /* mini temporizador */
 body:has(#mini:not([hidden])) #app { padding-bottom: calc(136px + var(--safe-b)); }

@@ -28,10 +28,13 @@ export const fmtNum = (n) => (Math.round(n * 10) / 10).toLocaleString('es-ES');
 // ---------- volumen y métricas por tipo ----------
 const working = (sets) => sets.filter((s) => !s.warmup);
 
+// Repeticiones reales de una serie (en triseries cada serie son 3 tramos)
+export const realReps = (s) => s.reps * (exerciseById(s.exercise_id)?.mult || 1);
+
 export function volume(sets, type) {
   const w = working(sets);
   switch (type) {
-    case 'weight': return w.reduce((a, s) => a + s.weight * s.reps, 0);
+    case 'weight': return w.reduce((a, s) => a + s.weight * realReps(s), 0);
     case 'bodyweight': return w.reduce((a, s) => a + s.reps * (1 + s.weight / 100), 0);
     case 'time': return w.reduce((a, s) => a + s.reps, 0);
     case 'cardio': return w.reduce((a, s) => a + (s.weight > 0 ? s.weight : s.reps / 10), 0);
@@ -53,7 +56,8 @@ export function prLabel(s, type) {
   return `${fmtNum(s.weight)} km`;
 }
 export function setLabel(s, type) {
-  if (type === 'weight') return `${fmtNum(s.weight)}×${s.reps}`;
+  const m = exerciseById(s.exercise_id)?.mult;
+  if (type === 'weight') return m ? `${fmtNum(s.weight)}×${s.reps}×${m}` : `${fmtNum(s.weight)}×${s.reps}`;
   if (type === 'bodyweight') return s.weight ? `+${fmtNum(s.weight)}×${s.reps}` : `${s.reps} reps`;
   if (type === 'time') return s.weight ? `${s.reps}s +${fmtNum(s.weight)}kg` : `${s.reps} s`;
   return `${fmtNum(s.weight)} km · ${s.reps}′`;
@@ -150,7 +154,21 @@ const MET_PESAS = 5, RPE_PESAS = 7, MET_CARDIO = 7, RPE_CARDIO = 6;
  * Esfuerzo de un conjunto de días: minutos, carga (minutos × dureza) y kcal estimadas.
  * Pesas: duración = tiempo entre primera y última serie (+5 min). Cardio: minutos apuntados.
  */
-export function effort(sets, acts, bodyKg) {
+/**
+ * kcal por "MET-minuto" de una persona.
+ * Con peso + altura + edad + sexo usa su metabolismo basal (Mifflin-St Jeor);
+ * solo con el peso, la fórmula clásica (1 MET ≈ 1 kcal por kg y hora).
+ */
+export function kcalPerMetMin(p) {
+  if (!p?.weight_kg) return null;
+  if (p.height_cm && p.age && (p.sex === 'h' || p.sex === 'm')) {
+    const bmr = 10 * p.weight_kg + 6.25 * p.height_cm - 5 * p.age + (p.sex === 'h' ? 5 : -161);
+    return bmr / 1440;
+  }
+  return p.weight_kg / 60;
+}
+
+export function effort(sets, acts, person) {
   let min = 0, load = 0, metMin = 0;
   const byDay = {};
   sets.forEach((s) => (byDay[s.day] ||= []).push(s));
@@ -167,7 +185,8 @@ export function effort(sets, acts, bodyKg) {
     min += cm; load += cm * RPE_CARDIO; metMin += cm * MET_CARDIO;
   });
   acts.forEach((a) => { min += a.minutes; load += a.minutes * a.rpe; metMin += a.minutes * metFromRpe(a.rpe); });
-  return { min: Math.round(min), load: Math.round(load), kcal: bodyKg ? Math.round((metMin * bodyKg) / 60) : null };
+  const k = kcalPerMetMin(person);
+  return { min: Math.round(min), load: Math.round(load), kcal: k ? Math.round(metMin * k) : null };
 }
 
 // Humor general del panel según la semana

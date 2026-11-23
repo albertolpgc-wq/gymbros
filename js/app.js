@@ -1,12 +1,14 @@
 import * as S from './store.js';
 import { GROUPS, EXERCISES, exerciseById, groupById, exercisesOf, FIELDS, defaultStep, STEP_OPTIONS } from './exercises.js';
 import { iconSvg } from './icons.js';
+import { groupArt, groupJoke } from './groupArt.js';
 import {
   today, addDays, weekStart, parseDay, dayStr, fmtDayLong, fmtDayShort, monthName, relDay, fmtNum,
   sessions, prSetIds, prValue, light, LIGHT_FACE, frase, moodOf, volumeLabel, setLabel, prLabel, MESES_CORTOS,
-  effort, rpeInfo,
+  effort, rpeInfo, realReps,
 } from './stats.js';
 import * as TM from './timer.js';
+import * as GPS from './gps.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -108,13 +110,13 @@ function renderUsers() {
 }
 
 // ---------------- panel principal ----------------
-function weekSummary(sets, acts, ws, nDays = 7, bodyKg = null) {
+function weekSummary(sets, acts, ws, nDays = 7, person = null) {
   const we = addDays(ws, nDays);
   const wk = sets.filter((s) => s.day >= ws && s.day < we);
   const wa = acts.filter((a) => a.day >= ws && a.day < we);
   const days = new Set([...wk.map((s) => s.day), ...wa.map((a) => a.day)]);
-  const kg = wk.filter((s) => !s.warmup && exerciseById(s.exercise_id)?.type === 'weight').reduce((a, s) => a + s.weight * s.reps, 0);
-  return { wk, wa, days, kg, eff: effort(wk, wa, bodyKg) };
+  const kg = wk.filter((s) => !s.warmup && exerciseById(s.exercise_id)?.type === 'weight').reduce((a, s) => a + s.weight * realReps(s), 0);
+  return { wk, wa, days, kg, eff: effort(wk, wa, person) };
 }
 const pctDiff = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
 const diffTxt = (d) => (d === null ? '' : `${d >= 0 ? '▲' : '▼'} ${Math.abs(d)}% vs sem. pasada`);
@@ -125,10 +127,10 @@ function renderHome() {
   const acts = myActs();
   const td = today();
   const ws = weekStart(td);
-  const cur = weekSummary(sets, acts, ws, 7, u.weight_kg);
-  const prev = weekSummary(sets, acts, addDays(ws, -7), 7, u.weight_kg);
+  const cur = weekSummary(sets, acts, ws, 7, u);
+  const prev = weekSummary(sets, acts, addDays(ws, -7), 7, u);
   const dayIdx = Math.round((parseDay(td) - parseDay(ws)) / 864e5);
-  const prevSoFar = weekSummary(sets, acts, addDays(ws, -7), dayIdx + 1, u.weight_kg); // semana pasada hasta el mismo día
+  const prevSoFar = weekSummary(sets, acts, addDays(ws, -7), dayIdx + 1, u); // semana pasada hasta el mismo día
 
   // semáforo por ejercicio hecho esta semana
   const exIds = [...new Set(cur.wk.map((s) => s.exercise_id))];
@@ -254,8 +256,9 @@ function renderGroups() {
     <div class="groups">
       ${GROUPS.map((g) => { const last = lastDayOfGroup(sets, g.id); return `
         <a class="group" href="#/g/${g.id}">
-          ${iconSvg(g.icon)}
-          <b>${g.emoji} ${g.name}</b>
+          ${groupArt(g.id) || iconSvg(g.icon)}
+          <b>${g.name}</b>
+          <small class="joke">${groupJoke(g.id)}</small>
           <small>${last ? relDay(last) : 'sin registros'}</small>
         </a>`; }).join('')}
     </div>`, { nav: 'train' });
@@ -289,12 +292,14 @@ function renderGroup(gid) {
         let l = last ? light(last.volume, ss[1]?.volume) : null;
         if (l === 'red' && doneToday) l = 'progress';
         return `
-        <a class="ex-item ${doneToday ? 'today' : ''}" href="#/e/${ex.id}">
+        <a class="ex-item ${doneToday ? 'today' : ''} ${ex.boom ? 'boom' : ''} ${ex.never ? 'never' : ''} ${ex.always ? 'always' : ''} ${ex.again ? 'again' : ''}" href="#/e/${ex.id}">
           ${thumb(ex)}
           <span class="grow">
             <b>${esc(ex.name)}</b>
             <small class="brand">${esc(ex.brand)}</small>
-            <small>${last ? `${doneToday ? '✅ hoy' : relDay(last.day)} · ${last.sets.filter((s) => !s.warmup).map((s) => setLabel(s, ex.type)).join('  ')}` : 'Nunca registrado'}</small>
+            ${ex.always ? '<small class="joke">Si no hay Bayesian, no ha sido día de bíceps 👑</small>' : ''}
+            ${ex.again ? `<small class="joke">${ss.length ? `Llevas ${ss.length} ${ss.length === 1 ? 'día' : 'días'} de laterales. ¿Otra vez? Pesao 🙄` : '¿Laterales? ¿Otra vez? 🙄'}</small>` : ''}
+            <small>${last ? `${doneToday ? '✅ hoy' : relDay(last.day)} · ${last.sets.filter((s) => !s.warmup).map((s) => setLabel(s, ex.type)).join('  ')}` : ex.never ? '<span class="joke">«La semana que viene lo hacemos» — Adrián, siempre</span>' : 'Nunca registrado'}</small>
           </span>
           ${l ? `<i class="dot ${l}"></i>` : ''}
         </a>`; }).join('')}
@@ -322,7 +327,7 @@ function renderExercise(exId) {
 
   // valores iniciales del formulario
   const lastSet = tdS?.sets[tdS.sets.length - 1] || prev?.sets.find((s) => !s.warmup) || null;
-  const d = state.draft[ex.id] ||= { a: lastSet ? lastSet.weight : (ex.type === 'cardio' ? 1 : ex.type === 'weight' ? (stepA === 2 ? 10 : 20) : 0), b: lastSet ? lastSet.reps : (ex.type === 'time' ? 30 : ex.type === 'cardio' ? 10 : 10), warm: false };
+  const d = state.draft[ex.id] ||= { a: lastSet ? lastSet.weight : (ex.type === 'cardio' ? 1 : ex.type === 'weight' ? (stepA === 2 ? 10 : 20) : 0), b: lastSet ? lastSet.reps : (ex.defReps || (ex.type === 'time' ? 30 : 10)), warm: false };
 
   let face, msg;
   if (!prev) { face = tdS ? LIGHT_FACE.new : '🤔'; msg = tdS ? frase('new', ex.id) : 'Sin registros anteriores. Hoy marcas la referencia.'; }
@@ -335,7 +340,7 @@ function renderExercise(exId) {
 
   layout(esc(ex.name), `
     <section class="ex-head">
-      <div class="media">${photo ? `<img src="${photo}" alt="Foto de la máquina">` : iconSvg(ex.icon, 'big')}</div>
+      <div class="media ${ex.boom ? 'boom' : ''}">${photo ? `<img src="${photo}" alt="Foto de la máquina">` : iconSvg(ex.icon, 'big')}</div>
       <div class="ex-meta">
         <span class="chip">${esc(ex.brand)}</span>
         <label class="btn small ghost">📷 ${photo ? 'Cambiar foto' : 'Foto máquina'}<input type="file" accept="image/*" capture="environment" id="photo" hidden></label>
@@ -362,6 +367,8 @@ function renderExercise(exId) {
       ${todayPR ? '<div class="pr-burst">¡¡PR!!</div>' : ''}
     </section>
 
+    ${ex.gps ? '<section class="card walk" id="walkCard"></section>' : ''}
+
     <section class="card entry">
       <h2>${d.warm ? 'Calentamiento' : `Serie ${(tdS?.sets.filter((s) => !s.warmup).length || 0) + 1}`}</h2>
       <div class="steppers">
@@ -372,6 +379,7 @@ function renderExercise(exId) {
       <div class="step-pick"><span>Salto de peso</span>
         ${STEP_OPTIONS.map((s) => `<button class="${s === stepA ? 'on' : ''}" data-stepa="${s}">${fmtNum(s)}</button>`).join('')}
       </div>` : ''}
+      ${ex.mult ? `<p class="muted small mult-hint">${ex.boom ? '💣' : '🔁'} Cada serie = ${ex.mult} tramos de las reps que pongas (${d.b} → ${d.b * ex.mult} reps en total)</p>` : ''}
       <label class="toggle"><input type="checkbox" id="warm" ${d.warm ? 'checked' : ''}> Serie de calentamiento</label>
       <button class="btn big" id="addSet">＋ Añadir serie</button>
       <div class="rest-opt">
@@ -413,6 +421,7 @@ function renderExercise(exId) {
   `, { back: `#/g/${ex.group}`, nav: 'train' });
 
   // eventos
+  paintWalk();
   bindSteppers(d);
   $$('[data-stepa]').forEach((b) => b.onclick = () => { ls.set(`gym.step.${ex.id}`, +b.dataset.stepa); renderExercise(ex.id); });
   $('#warm').onchange = (e) => (d.warm = e.target.checked);
@@ -425,7 +434,9 @@ function renderExercise(exId) {
     S.addSet({ user_id: state.userId, exercise_id: ex.id, day: td, weight: d.a, reps: d.b, warmup: d.warm });
     d.warm = false;
     const nowPR = prSetIds(mySets(), ex.id).size;
-    if (nowPR > wasPR) { toast('🚨 ¡¡NUEVO RÉCORD!! 🚨', 'pr'); TM.beep(1318, 200); setTimeout(() => TM.beep(1568, 400), 220); }
+    if (ex.never && !ss.length) { toast('🎉 ¡¡HISTÓRICO!! Por fin alguien hace el press francés. Adrián, llora.', 'pr'); TM.beep(1046, 200); setTimeout(() => TM.beep(1568, 500), 220); }
+    else if (ex.again && nowPR <= wasPR) toast(['🙄 Laterales… otra vez. Nadie sorprendido.', '🙄 Una serie más de laterales. Cómo no.', '🥥 Esos hombros ya no caben por la puerta.'][(tdS?.sets.length || 0) % 3]);
+    else if (nowPR > wasPR) { toast('🚨 ¡¡NUEVO RÉCORD!! 🚨', 'pr'); TM.beep(1318, 200); setTimeout(() => TM.beep(1568, 400), 220); }
     if (state.autoRest) TM.startRest(state.restSecs);
   };
   $$('[data-del]').forEach((b) => b.onclick = () => {
@@ -442,6 +453,48 @@ function renderExercise(exId) {
   bindChart(ss, ex);
 }
 
+// ---------------- caminata con GPS ----------------
+function paintWalk() {
+  const w = GPS.walk;
+  const card = $('#walkCard');
+  if (card) {
+    if (!w) {
+      card.innerHTML = `
+        <h2>📍 Caminata con GPS</h2>
+        <p class="muted small">Pulsa empezar al salir de casa y terminar al llegar: se guardan solos los minutos y los kilómetros.
+        Deja la app abierta (la pantalla no se apagará); si la cierras, el tiempo sigue contando pero los km no.</p>
+        <button class="btn big" id="walkStart">▶ Empezar a caminar</button>`;
+      $('#walkStart').onclick = () => { TM.unlockAudio(); GPS.startWalk(location.hash.split('/')[2]); };
+    } else {
+      const t = GPS.elapsed(), km = w.meters / 1000;
+      const pace = km > 0.05 ? t / 60 / km : null;
+      card.innerHTML = `
+        <h2>📍 Caminando… <small>${w.error ? `⚠️ ${esc(w.error)}` : w.acc ? `GPS ±${w.acc} m` : 'buscando señal…'}</small></h2>
+        <div class="walk-stats">
+          <div><b>${TM.fmtClock(t)}</b><span>tiempo</span></div>
+          <div><b>${fmtNum(Math.round(km * 100) / 100)}</b><span>km</span></div>
+          <div><b>${pace ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, '0')}` : '–'}</b><span>min/km</span></div>
+        </div>
+        <div class="t-btns">
+          <button class="btn" id="walkStop">■ Terminar y guardar</button>
+          <button class="btn ghost" id="walkCancel">Cancelar</button>
+        </div>`;
+      $('#walkStop').onclick = () => {
+        const r = GPS.stopWalk();
+        if (r) { S.addSet({ user_id: state.userId, exercise_id: r.exId, day: today(), weight: r.km, reps: r.minutes }); toast(`🚶 Guardado: ${fmtNum(r.km)} km en ${r.minutes} min`); }
+      };
+      $('#walkCancel').onclick = () => { if (confirm('¿Descartar esta caminata?')) GPS.stopWalk(); };
+    }
+  }
+  // aviso flotante si se está caminando y estás en otra pantalla
+  const bar = $('#walkbar');
+  const show = !!w && !card;
+  bar.hidden = !show;
+  if (show) bar.innerHTML = `<a href="#/e/${w.exId}">📍 Caminando · <b>${TM.fmtClock(GPS.elapsed())}</b> · ${fmtNum(Math.round(w.meters / 10) / 100)} km</a>`;
+}
+GPS.onWalk(paintWalk);
+setInterval(() => { if (GPS.walk) paintWalk(); }, 1000);
+
 // ---------------- HIIT / clases ----------------
 function renderClass(ex) {
   const u = me();
@@ -451,7 +504,7 @@ function renderClass(ex) {
   const prev = acts.find((a) => a.day < td);
   const d = state.draft[ex.id] ||= { min: prev?.minutes || 50, rpe: prev?.rpe || 8, note: '' };
   const ri = rpeInfo(d.rpe);
-  const kcalOf = (a) => effort([], [a], u.weight_kg).kcal;
+  const kcalOf = (a) => effort([], [a], u).kcal;
   const loadOf = (a) => Math.round(a.minutes * a.rpe);
 
   layout(esc(ex.name), `
@@ -524,23 +577,31 @@ function renderProfile() {
     <section class="card profile">
       <div class="emojis">${EMOJIS.map((e) => `<button type="button" class="emo ${e === u.emoji ? 'on' : ''}" data-e="${e}">${e}</button>`).join('')}</div>
       <label>Nombre<input id="pName" maxlength="20" value="${esc(u.name)}" autocomplete="off"></label>
+      <div class="seg sex" role="radiogroup">
+        <button type="button" data-sex="h" class="${u.sex === 'h' ? 'on' : ''}">🙋‍♂️ Hombre</button>
+        <button type="button" data-sex="m" class="${u.sex === 'm' ? 'on' : ''}">🙋‍♀️ Mujer</button>
+      </div>
       <div class="two">
+        <label>Edad<input id="pAge" inputmode="numeric" value="${u.age ?? ''}" placeholder="35"></label>
+        <span></span>
         <label>Peso (kg)<input id="pKg" inputmode="decimal" value="${u.weight_kg ?? ''}" placeholder="80"></label>
         <label>Altura (cm)<input id="pCm" inputmode="numeric" value="${u.height_cm ?? ''}" placeholder="178"></label>
       </div>
       ${imc ? `<p class="muted">IMC ${fmtNum(Math.round(imc * 10) / 10)} · ${imcTxt}</p>` : ''}
-      <p class="muted small">El peso se usa para estimar las kcal. Es una aproximación (±30 %): sin pulsómetro no se puede afinar más.</p>
+      <p class="muted small">Con sexo, edad, peso y altura calculo tu metabolismo basal (fórmula Mifflin-St Jeor) y con él las kcal. Aun así es una aproximación (±20-30 %): sin pulsómetro no se puede afinar más.</p>
       <button class="btn big" id="pSave">Guardar</button>
     </section>
-    <a class="btn big ghost" href="#/">👥 Cambiar de usuario</a>`, { back: '#/home', nav: null });
-  let emoji = u.emoji;
+    <a class="btn big ghost" href="#/">👥 Cambiar de usuario</a>
+    <p class="muted small center">Iconos de grupos: Fluent Emoji © Microsoft (licencia MIT)</p>`, { back: '#/home', nav: null });
+  let emoji = u.emoji, sex = u.sex || null;
   $$('.emo').forEach((b) => b.onclick = () => { emoji = b.dataset.e; $$('.emo').forEach((x) => x.classList.toggle('on', x === b)); });
+  $$('[data-sex]').forEach((b) => b.onclick = () => { sex = b.dataset.sex; $$('[data-sex]').forEach((x) => x.classList.toggle('on', x === b)); });
   $('#pSave').onclick = () => {
     const name = $('#pName').value.trim();
     if (!name) return toast('Ponte un nombre 😅');
     if (S.getUsers().some((x) => x.id !== u.id && x.name.toLowerCase() === name.toLowerCase())) return toast('Ese nombre ya existe 😅');
     const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return n > 0 ? n : null; };
-    S.updateUser({ ...u, name, emoji, weight_kg: num($('#pKg').value), height_cm: num($('#pCm').value) });
+    S.updateUser({ ...u, name, emoji, sex, age: num($('#pAge').value), weight_kg: num($('#pKg').value), height_cm: num($('#pCm').value) });
     toast('Perfil guardado 💪');
     go('#/home');
   };
@@ -674,7 +735,7 @@ function renderDay(ds) {
   const daySets = sets.filter((s) => s.day === ds);
   const exIds = [...new Set(daySets.map((s) => s.exercise_id))];
   const dayActs = myActs().filter((a) => a.day === ds);
-  const eff = effort(daySets, dayActs, me().weight_kg);
+  const eff = effort(daySets, dayActs, me());
   layout(fmtDayShort(ds), `
     <p class="muted center">${fmtDayLong(ds)}</p>
     ${exIds.length || dayActs.length ? `<p class="center day-eff">⚡ Carga ${fmtNum(eff.load)} · ⏱️ ~${eff.min} min${eff.kcal !== null ? ` · 🔥 ~${fmtNum(eff.kcal)} kcal` : ''}</p>` : ''}
