@@ -2,13 +2,16 @@
 // y se sincroniza con Supabase en cuanto hay conexión.
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 
-const DB_KEY = 'gym.db.v1';
-const OUTBOX_KEY = 'gym.outbox.v1';
-const PHOTOS_KEY = 'gym.photos.v1';
-const PK = { users: ['id'], sets: ['id'], notes: ['user_id', 'exercise_id'], exercise_photos: ['exercise_id'] };
+// Con "?local" en la URL se usa un modo de pruebas que no toca la nube
+const TEST = new URLSearchParams(location.search).has('local');
+const P = TEST ? 'gym.test.' : 'gym.';
+const DB_KEY = `${P}db.v1`;
+const OUTBOX_KEY = `${P}outbox.v1`;
+const PHOTOS_KEY = `${P}photos.v1`;
+const PK = { users: ['id'], sets: ['id'], notes: ['user_id', 'exercise_id'], exercise_photos: ['exercise_id'], activities: ['id'] };
 
-const cloud = Boolean(SUPABASE_URL && SUPABASE_KEY);
-let db = { users: [], sets: [], notes: [] };
+const cloud = Boolean(SUPABASE_URL && SUPABASE_KEY) && !TEST;
+let db = { users: [], sets: [], notes: [], activities: [] };
 let photos = {};
 let outbox = [];
 let listeners = [];
@@ -100,10 +103,11 @@ export async function sync() {
       outbox.shift();
       persist();
     }
-    const [users, sets, notes, ph] = await Promise.all([
+    const [users, sets, notes, ph, activities] = await Promise.all([
       fetchAll('users'), fetchAll('sets'), fetchAll('notes'), fetchAll('exercise_photos'),
+      fetchAll('activities').catch(() => db.activities), // por si aún no existe la tabla
     ]);
-    db = { users, sets, notes };
+    db = { users, sets, notes, activities };
     photos = Object.fromEntries(ph.map((p) => [p.exercise_id, p.data]));
     outbox.forEach(applyLocal); // lo que se haya añadido mientras tanto
     writeJSON(PHOTOS_KEY, photos);
@@ -120,7 +124,8 @@ export async function sync() {
 }
 
 export function init() {
-  db = readJSON(DB_KEY, db);
+  db = { ...db, ...readJSON(DB_KEY, db) };
+  db.activities ||= [];
   outbox = readJSON(OUTBOX_KEY, []);
   photos = readJSON(PHOTOS_KEY, {});
   status.pending = outbox.length;
@@ -138,6 +143,8 @@ export const getSets = (userId) => db.sets.filter((s) => s.user_id === userId);
 export const getAllSets = () => db.sets;
 export const getNote = (userId, exId) => db.notes.find((n) => n.user_id === userId && n.exercise_id === exId)?.text || '';
 export const getPhoto = (exId) => photos[exId] || null;
+export const getActivities = (userId) => db.activities.filter((a) => a.user_id === userId);
+export const getAllActivities = () => db.activities;
 
 // ---------- modificaciones ----------
 export function addUser(name, emoji) {
@@ -151,6 +158,12 @@ export function addSet({ user_id, exercise_id, day, weight, reps, warmup }) {
   enqueue({ table: 'sets', kind: 'upsert', row });
   return row;
 }
+export function addActivity({ user_id, exercise_id, day, minutes, rpe, note }) {
+  const row = { id: uuid(), user_id, exercise_id, day, minutes: +minutes || 0, rpe: +rpe || 5, note: note || '', created_at: new Date().toISOString() };
+  enqueue({ table: 'activities', kind: 'upsert', row });
+  return row;
+}
+export function deleteActivity(row) { enqueue({ table: 'activities', kind: 'delete', row: { id: row.id } }); }
 export function deleteSet(row) { enqueue({ table: 'sets', kind: 'delete', row: { id: row.id } }); }
 export function setNote(user_id, exercise_id, text) {
   enqueue({ table: 'notes', kind: 'upsert', row: { user_id, exercise_id, text, updated_at: new Date().toISOString() } });

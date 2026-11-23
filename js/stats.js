@@ -135,6 +135,41 @@ const FRASES = {
 function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
 export const frase = (kind, seed = '') => { const a = FRASES[kind] || FRASES.yellow; return a[hash(seed) % a.length]; };
 
+// ---------- dureza (RPE 1-10), carga y kcal estimadas ----------
+export function rpeInfo(r) {
+  if (r <= 3) return { face: '😌', label: 'Paseíto' };
+  if (r <= 6) return { face: '😅', label: 'Ha picado' };
+  if (r <= 8) return { face: '🥵', label: 'Me ha reventado' };
+  return { face: '💀', label: 'Modo Pablo' };
+}
+// Equivalencia aproximada dureza -> MET (gasto respecto a estar sentado)
+const metFromRpe = (r) => 3 + 0.6 * r;
+const MET_PESAS = 5, RPE_PESAS = 7, MET_CARDIO = 7, RPE_CARDIO = 6;
+
+/**
+ * Esfuerzo de un conjunto de días: minutos, carga (minutos × dureza) y kcal estimadas.
+ * Pesas: duración = tiempo entre primera y última serie (+5 min). Cardio: minutos apuntados.
+ */
+export function effort(sets, acts, bodyKg) {
+  let min = 0, load = 0, metMin = 0;
+  const byDay = {};
+  sets.forEach((s) => (byDay[s.day] ||= []).push(s));
+  Object.values(byDay).forEach((ds) => {
+    const cardio = ds.filter((s) => exerciseById(s.exercise_id)?.type === 'cardio');
+    const strength = ds.filter((s) => exerciseById(s.exercise_id)?.type !== 'cardio');
+    if (strength.length) {
+      const t = strength.map((s) => Date.parse(s.created_at)).filter(Boolean).sort((a, b) => a - b);
+      const span = t.length > 1 ? (t[t.length - 1] - t[0]) / 60000 : 0;
+      const m = Math.min(150, Math.max(span + 5, strength.length * 3));
+      min += m; load += m * RPE_PESAS; metMin += m * MET_PESAS;
+    }
+    const cm = cardio.reduce((a, s) => a + s.reps, 0);
+    min += cm; load += cm * RPE_CARDIO; metMin += cm * MET_CARDIO;
+  });
+  acts.forEach((a) => { min += a.minutes; load += a.minutes * a.rpe; metMin += a.minutes * metFromRpe(a.rpe); });
+  return { min: Math.round(min), load: Math.round(load), kcal: bodyKg ? Math.round((metMin * bodyKg) / 60) : null };
+}
+
 // Humor general del panel según la semana
 export function moodOf(counts, trainedDays) {
   if (!trainedDays) return { face: '🛋️', title: 'Modo sofá activado', text: 'Esta semana aún no has pisado el gym. Las pesas te echan de menos.' };

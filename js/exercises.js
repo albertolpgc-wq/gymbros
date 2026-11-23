@@ -13,6 +13,7 @@ export const GROUPS = [
   { id: 'gluteo',  name: 'Glúteo',   emoji: '🍑', icon: 'hipThrust' },
   { id: 'abdomen', name: 'Abdomen',  emoji: '🍫', icon: 'crunch' },
   { id: 'cardio',  name: 'Cardio',   emoji: '🏃', icon: 'run' },
+  { id: 'hiit',    name: 'HIIT',     emoji: '💀', icon: 'hiit' },
 ];
 
 export const EXERCISES = [
@@ -84,7 +85,19 @@ export const EXERCISES = [
   { id: 'cinta',                group: 'cardio', name: 'Cinta de correr',          brand: 'Technogym',        icon: 'run',          type: 'cardio' },
   { id: 'bici',                 group: 'cardio', name: 'Bicicleta estática',       brand: 'Technogym',        icon: 'bike',         type: 'cardio' },
   { id: 'eliptica',             group: 'cardio', name: 'Elíptica',                 brand: 'Technogym',        icon: 'run',          type: 'cardio' },
+
+  // HIIT / CLASES (se registra duración + dureza + nota, no series)
+  { id: 'hiit-pablo',           group: 'hiit',   name: 'HIIT con Pablo',           brand: 'Full body · alta intensidad', icon: 'hiit', type: 'class' },
 ];
+
+// Salto por defecto del peso según el material (sin decimales salvo que se elija 2,5)
+export function defaultStep(ex) {
+  if (ex.type === 'cardio') return 0.5;
+  if (/mancuerna/i.test(ex.brand)) return 2;   // mancuernas Technogym de 2 en 2
+  if (ex.type === 'bodyweight' || ex.type === 'time') return 2;
+  return 5;                                     // máquinas, barras y poleas
+}
+export const STEP_OPTIONS = [1, 2, 2.5, 5];
 
 export const exerciseById = (id) => EXERCISES.find((e) => e.id === id);
 export const groupById = (id) => GROUPS.find((g) => g.id === id);

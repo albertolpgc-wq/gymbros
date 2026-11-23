@@ -1,9 +1,10 @@
 import * as S from './store.js';
-import { GROUPS, EXERCISES, exerciseById, groupById, exercisesOf, FIELDS } from './exercises.js';
+import { GROUPS, EXERCISES, exerciseById, groupById, exercisesOf, FIELDS, defaultStep, STEP_OPTIONS } from './exercises.js';
 import { iconSvg } from './icons.js';
 import {
   today, addDays, weekStart, parseDay, dayStr, fmtDayLong, fmtDayShort, monthName, relDay, fmtNum,
   sessions, prSetIds, prValue, light, LIGHT_FACE, frase, moodOf, volumeLabel, setLabel, prLabel, MESES_CORTOS,
+  effort, rpeInfo,
 } from './stats.js';
 import * as TM from './timer.js';
 
@@ -30,6 +31,8 @@ const state = {
 const view = () => $('#view');
 const me = () => S.getUser(state.userId);
 const mySets = () => S.getSets(state.userId);
+const myActs = () => S.getActivities(state.userId);
+const actDays = (acts) => new Set(acts.map((a) => a.day));
 
 // ---------------- router ----------------
 function route() {
@@ -45,6 +48,7 @@ function route() {
     case 'cal': return renderCalendar();
     case 'day': return renderDay(parts[1]);
     case 'timer': return renderTimer();
+    case 'perfil': return renderProfile();
     default: location.hash = '#/home';
   }
 }
@@ -62,7 +66,7 @@ function layout(title, body, { back = null, nav = null } = {}) {
       ${back ? `<a class="back" href="${back}" aria-label="Volver">‹</a>` : '<span class="logo">🏋️</span>'}
       <h1>${title}</h1>
       ${sync}
-      ${u ? `<a class="me" href="#/" title="Cambiar de usuario">${esc(u.emoji)}</a>` : ''}
+      ${u ? `<a class="me" href="#/perfil" title="Mi perfil">${esc(u.emoji)}</a>` : ''}
     </header>
     <main class="content">${body}</main>`;
   $$('.tab').forEach((t) => t.classList.toggle('on', t.dataset.tab === nav));
@@ -104,23 +108,27 @@ function renderUsers() {
 }
 
 // ---------------- panel principal ----------------
-function weekSummary(sets, ws, nDays = 7) {
+function weekSummary(sets, acts, ws, nDays = 7, bodyKg = null) {
   const we = addDays(ws, nDays);
   const wk = sets.filter((s) => s.day >= ws && s.day < we);
-  const days = new Set(wk.map((s) => s.day));
+  const wa = acts.filter((a) => a.day >= ws && a.day < we);
+  const days = new Set([...wk.map((s) => s.day), ...wa.map((a) => a.day)]);
   const kg = wk.filter((s) => !s.warmup && exerciseById(s.exercise_id)?.type === 'weight').reduce((a, s) => a + s.weight * s.reps, 0);
-  return { wk, days, kg };
+  return { wk, wa, days, kg, eff: effort(wk, wa, bodyKg) };
 }
+const pctDiff = (a, b) => (b ? Math.round(((a - b) / b) * 100) : null);
+const diffTxt = (d) => (d === null ? '' : `${d >= 0 ? '▲' : '▼'} ${Math.abs(d)}% vs sem. pasada`);
 
 function renderHome() {
   const u = me();
   const sets = mySets();
+  const acts = myActs();
   const td = today();
   const ws = weekStart(td);
-  const cur = weekSummary(sets, ws);
-  const prev = weekSummary(sets, addDays(ws, -7));
+  const cur = weekSummary(sets, acts, ws, 7, u.weight_kg);
+  const prev = weekSummary(sets, acts, addDays(ws, -7), 7, u.weight_kg);
   const dayIdx = Math.round((parseDay(td) - parseDay(ws)) / 864e5);
-  const prevSoFar = weekSummary(sets, addDays(ws, -7), dayIdx + 1); // semana pasada hasta el mismo día
+  const prevSoFar = weekSummary(sets, acts, addDays(ws, -7), dayIdx + 1, u.weight_kg); // semana pasada hasta el mismo día
 
   // semáforo por ejercicio hecho esta semana
   const exIds = [...new Set(cur.wk.map((s) => s.exercise_id))];
@@ -137,23 +145,36 @@ function renderHome() {
     const pr = last.sets.some((s) => prs.has(s.id));
     return { ex, l, pr, last, before };
   }).filter(Boolean);
+  // clases (HIIT): última sesión de la semana vs la anterior, por carga
+  [...new Set(cur.wa.map((a) => a.exercise_id))].forEach((id) => {
+    const ex = exerciseById(id); if (!ex) return;
+    const list = acts.filter((a) => a.exercise_id === id).sort((a, b) => (a.day + a.created_at < b.day + b.created_at ? 1 : -1));
+    const last = list[0], before = list[1];
+    const ld = (a) => a.minutes * a.rpe;
+    const l = light(ld(last), before && ld(before));
+    if (counts[l] !== undefined) counts[l]++;
+    rows.push({ ex, l, pr: false, cls: true, txt: `${rpeInfo(last.rpe).face} ${last.rpe}/10 · ${last.minutes} min${before ? ` · antes ${before.rpe}/10 · ${before.minutes} min` : ' · primera vez'}` });
+  });
   const mood = moodOf(counts, cur.days.size);
   const prRows = rows.filter((r) => r.pr);
 
   // racha de semanas
   let streak = 0; let w = cur.days.size ? ws : addDays(ws, -7);
-  while (sets.some((s) => s.day >= w && s.day < addDays(w, 7))) { streak++; w = addDays(w, -7); }
+  const inWeek = (d, w0) => d >= w0 && d < addDays(w0, 7);
+  while (sets.some((s) => inWeek(s.day, w)) || acts.some((a) => inWeek(a.day, w))) { streak++; w = addDays(w, -7); }
 
-  // ranking de colegas (kg levantados esta semana)
-  const all = S.getAllSets();
+  // ranking de colegas por carga semanal (pesas + cardio + HIIT)
+  const all = S.getAllSets(), allActs = S.getAllActivities();
   const rank = S.getUsers().map((x) => {
-    const r = weekSummary(all.filter((s) => s.user_id === x.id), ws);
-    return { u: x, kg: r.kg, days: r.days.size };
-  }).filter((r) => r.days).sort((a, b) => b.kg - a.kg);
+    const r = weekSummary(all.filter((s) => s.user_id === x.id), allActs.filter((a) => a.user_id === x.id), ws);
+    return { u: x, kg: r.kg, load: r.eff.load, days: r.days.size };
+  }).filter((r) => r.days).sort((a, b) => b.load - a.load);
 
-  const diff = prevSoFar.kg ? Math.round(((cur.kg - prevSoFar.kg) / prevSoFar.kg) * 100) : null;
+  const diff = pctDiff(cur.kg, prevSoFar.kg);
+  const diffLoad = pctDiff(cur.eff.load, prevSoFar.eff.load);
+  const diffKcal = cur.eff.kcal !== null ? pctDiff(cur.eff.kcal, prevSoFar.eff.kcal) : null;
   const letters = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-  const groupsWeek = [...new Set(cur.wk.map((s) => exerciseById(s.exercise_id)?.group))].map(groupById).filter(Boolean);
+  const groupsWeek = [...new Set([...cur.wk, ...cur.wa].map((s) => exerciseById(s.exercise_id)?.group))].map(groupById).filter(Boolean);
 
   layout(`Hola, ${esc(u.name)}`, `
     <section class="mood card">
@@ -172,6 +193,13 @@ function renderHome() {
       <div class="stat"><span class="k">Kg levantados</span><b>${fmtNum(Math.round(cur.kg))}</b>
         <span class="s ${diff === null ? '' : diff >= 0 ? 'up' : 'down'}">${diff === null ? `la anterior: ${fmtNum(Math.round(prev.kg))}` : `${diff >= 0 ? '▲' : '▼'} ${Math.abs(diff)}% vs mismo día sem. pasada`}</span></div>
       <div class="stat"><span class="k">Racha</span><b>${streak} ${streak === 1 ? 'sem' : 'sems'}</b><span class="s">${streak >= 3 ? '🔥 imparable' : streak ? 'no la rompas' : 'empieza hoy'}</span></div>
+    </div>
+    <div class="stats two">
+      <div class="stat"><span class="k">⚡ Carga semanal</span><b>${fmtNum(cur.eff.load)}</b>
+        <span class="s ${diffLoad === null ? '' : diffLoad >= 0 ? 'up' : 'down'}">${diffLoad === null ? `${cur.eff.min} min de actividad` : diffTxt(diffLoad)}</span></div>
+      <div class="stat"><span class="k">🔥 kcal estimadas</span>${cur.eff.kcal === null
+        ? '<a class="s link" href="#/perfil">Pon tu peso en el perfil</a>'
+        : `<b>~${fmtNum(cur.eff.kcal)}</b><span class="s ${diffKcal === null ? '' : diffKcal >= 0 ? 'up' : 'down'}">${diffKcal === null ? 'aproximadas' : diffTxt(diffKcal)}</span>`}</div>
     </div>
 
     <a class="btn big train-cta" href="#/train">💪 Entrenar hoy <small>${fmtDayLong(td)}</small></a>
@@ -195,7 +223,7 @@ function renderHome() {
           <a class="ex-row" href="#/e/${r.ex.id}">
             <span class="face">${LIGHT_FACE[r.l]}</span>
             <span class="grow"><b>${esc(r.ex.name)}</b>
-              <small>${volumeLabel(r.last.volume, r.ex.type)}${r.before ? ` · antes ${volumeLabel(r.before.volume, r.ex.type)}` : ' · primera vez'}</small></span>
+              <small>${r.cls ? r.txt : `${volumeLabel(r.last.volume, r.ex.type)}${r.before ? ` · antes ${volumeLabel(r.before.volume, r.ex.type)}` : ' · primera vez'}`}</small></span>
             ${r.pr ? '<span class="pr-tag">¡PR!</span>' : ''}<i class="dot ${r.l}"></i>
           </a>`).join('')}`
       : '<p class="muted">Cuando registres ejercicios esta semana verás aquí si vas mejor o peor que la anterior.</p>'}
@@ -203,13 +231,12 @@ function renderHome() {
 
     ${rank.length ? `
     <section class="card">
-      <h2>🏆 Ranking colegas (semana)</h2>
+      <h2>🏆 Ranking colegas (semana) <small>por carga</small></h2>
       ${rank.map((r, i) => `
-        <div class="rank-row ${r.u.id === u.id ? 'me' : ''}">
+        <div class="rank-row ${r.u.id === u.id ? 'mine' : ''}">
           <span class="pos">${['🥇', '🥈', '🥉'][i] || i + 1}</span>
-          <span class="grow">${esc(r.u.emoji)} ${esc(r.u.name)}</span>
-          <small>${r.days} ${r.days === 1 ? 'día' : 'días'}</small>
-          <b>${fmtNum(Math.round(r.kg))} kg</b>
+          <span class="grow">${esc(r.u.emoji)} ${esc(r.u.name)}<small>${r.days} ${r.days === 1 ? 'día' : 'días'} · ${fmtNum(Math.round(r.kg))} kg</small></span>
+          <b>⚡ ${fmtNum(r.load)}</b>
         </div>`).join('')}
     </section>` : ''}
   `, { nav: 'home' });
@@ -221,7 +248,7 @@ function lastDayOfGroup(sets, gid) {
   return sets.filter((s) => ids.has(s.exercise_id)).reduce((m, s) => (s.day > m ? s.day : m), '');
 }
 function renderGroups() {
-  const sets = mySets();
+  const sets = [...mySets(), ...myActs()];
   layout('¿Qué toca hoy?', `
     <p class="muted center">${fmtDayLong(today())}</p>
     <div class="groups">
@@ -247,6 +274,15 @@ function renderGroup(gid) {
   layout(`${g.emoji} ${g.name}`, `
     <div class="ex-list">
       ${exercisesOf(gid).map((ex) => {
+        if (ex.type === 'class') {
+          const la = myActs().filter((a) => a.exercise_id === ex.id).sort((a, b) => (a.day + a.created_at < b.day + b.created_at ? 1 : -1))[0];
+          return `
+          <a class="ex-item ${la?.day === td ? 'today' : ''}" href="#/e/${ex.id}">
+            ${thumb(ex)}
+            <span class="grow"><b>${esc(ex.name)}</b><small class="brand">${esc(ex.brand)}</small>
+              <small>${la ? `${la.day === td ? '✅ hoy' : relDay(la.day)} · ${rpeInfo(la.rpe).face} ${la.rpe}/10 · ${la.minutes} min` : 'Nunca registrado'}</small></span>
+          </a>`;
+        }
         const ss = sessions(sets, ex.id);
         const last = ss[0];
         const doneToday = last?.day === td;
@@ -269,7 +305,9 @@ function renderGroup(gid) {
 function renderExercise(exId) {
   const ex = exerciseById(exId);
   if (!ex) return go('#/train');
+  if (ex.type === 'class') return renderClass(ex);
   const F = FIELDS[ex.type];
+  const stepA = ls.get(`gym.step.${ex.id}`, defaultStep(ex));
   const sets = mySets();
   const td = today();
   const ss = sessions(sets, ex.id);
@@ -284,7 +322,7 @@ function renderExercise(exId) {
 
   // valores iniciales del formulario
   const lastSet = tdS?.sets[tdS.sets.length - 1] || prev?.sets.find((s) => !s.warmup) || null;
-  const d = state.draft[ex.id] ||= { a: lastSet ? lastSet.weight : (ex.type === 'cardio' ? 1 : ex.type === 'weight' ? 20 : 0), b: lastSet ? lastSet.reps : (ex.type === 'time' ? 30 : ex.type === 'cardio' ? 10 : 10), warm: false };
+  const d = state.draft[ex.id] ||= { a: lastSet ? lastSet.weight : (ex.type === 'cardio' ? 1 : ex.type === 'weight' ? (stepA === 2 ? 10 : 20) : 0), b: lastSet ? lastSet.reps : (ex.type === 'time' ? 30 : ex.type === 'cardio' ? 10 : 10), warm: false };
 
   let face, msg;
   if (!prev) { face = tdS ? LIGHT_FACE.new : '🤔'; msg = tdS ? frase('new', ex.id) : 'Sin registros anteriores. Hoy marcas la referencia.'; }
@@ -327,9 +365,13 @@ function renderExercise(exId) {
     <section class="card entry">
       <h2>${d.warm ? 'Calentamiento' : `Serie ${(tdS?.sets.filter((s) => !s.warmup).length || 0) + 1}`}</h2>
       <div class="steppers">
-        ${stepper('a', F.a, d.a, F.stepA)}
+        ${stepper('a', F.a, d.a, stepA)}
         ${stepper('b', F.b, d.b, F.stepB)}
       </div>
+      ${ex.type !== 'cardio' ? `
+      <div class="step-pick"><span>Salto de peso</span>
+        ${STEP_OPTIONS.map((s) => `<button class="${s === stepA ? 'on' : ''}" data-stepa="${s}">${fmtNum(s)}</button>`).join('')}
+      </div>` : ''}
       <label class="toggle"><input type="checkbox" id="warm" ${d.warm ? 'checked' : ''}> Serie de calentamiento</label>
       <button class="btn big" id="addSet">＋ Añadir serie</button>
       <div class="rest-opt">
@@ -371,12 +413,8 @@ function renderExercise(exId) {
   `, { back: `#/g/${ex.group}`, nav: 'train' });
 
   // eventos
-  $$('.stp').forEach((b) => b.onclick = () => {
-    const k = b.dataset.k; const inp = $(`#inp-${k}`);
-    const v = Math.max(0, Math.round(((parseFloat(inp.value) || 0) + parseFloat(b.dataset.step)) * 100) / 100);
-    inp.value = v; d[k] = v;
-  });
-  $$('.stp-inp').forEach((inp) => inp.oninput = () => { d[inp.dataset.k] = parseFloat(inp.value.replace(',', '.')) || 0; });
+  bindSteppers(d);
+  $$('[data-stepa]').forEach((b) => b.onclick = () => { ls.set(`gym.step.${ex.id}`, +b.dataset.stepa); renderExercise(ex.id); });
   $('#warm').onchange = (e) => (d.warm = e.target.checked);
   $('#autoRest').onchange = (e) => { state.autoRest = e.target.checked; ls.set('gym.autoRest', state.autoRest); };
   $('#restSecs').onchange = (e) => { state.restSecs = +e.target.value; ls.set('gym.rest', state.restSecs); };
@@ -402,6 +440,119 @@ function renderExercise(exId) {
   };
   $('#delPhoto') && ($('#delPhoto').onclick = () => { if (confirm('¿Quitar la foto de esta máquina?')) S.setPhoto(ex.id, null); });
   bindChart(ss, ex);
+}
+
+// ---------------- HIIT / clases ----------------
+function renderClass(ex) {
+  const u = me();
+  const td = today();
+  const acts = myActs().filter((a) => a.exercise_id === ex.id).sort((a, b) => (a.day + a.created_at < b.day + b.created_at ? 1 : -1));
+  const tdA = acts.filter((a) => a.day === td);
+  const prev = acts.find((a) => a.day < td);
+  const d = state.draft[ex.id] ||= { min: prev?.minutes || 50, rpe: prev?.rpe || 8, note: '' };
+  const ri = rpeInfo(d.rpe);
+  const kcalOf = (a) => effort([], [a], u.weight_kg).kcal;
+  const loadOf = (a) => Math.round(a.minutes * a.rpe);
+
+  layout(esc(ex.name), `
+    <section class="ex-head">
+      <div class="media">${iconSvg(ex.icon, 'big')}</div>
+      <div class="ex-meta">
+        <span class="chip">${esc(ex.brand)}</span>
+        ${prev ? `<div class="best">La última vez<b>${rpeInfo(prev.rpe).face} ${prev.rpe}/10</b><small>${relDay(prev.day)} · ${prev.minutes} min</small></div>` : ''}
+        ${!u.weight_kg ? '<a class="btn small ghost" href="#/perfil">⚖️ Pon tu peso para ver kcal</a>' : ''}
+      </div>
+    </section>
+
+    ${tdA.length ? `
+    <section class="card compare">
+      <div class="cmp-face big-face">${rpeInfo(tdA[0].rpe).face}</div>
+      <div class="grow">
+        <h2>Hoy: ${rpeInfo(tdA[0].rpe).label}</h2>
+        <p class="muted">${tdA[0].minutes} min · carga ${loadOf(tdA[0])}${kcalOf(tdA[0]) ? ` · ~${kcalOf(tdA[0])} kcal` : ''}</p>
+        ${prev ? (() => { const l = light(loadOf(tdA[0]), loadOf(prev)); return `<p>${LIGHT_FACE[l]} ${frase(l, td + ex.id)}</p>`; })() : ''}
+      </div>
+    </section>` : ''}
+
+    <section class="card entry">
+      <h2>${tdA.length ? 'Añadir otra sesión' : 'Registrar la sesión de hoy'}</h2>
+      <div class="steppers one">${stepper('min', 'minutos', d.min, 5)}</div>
+      <div class="rpe">
+        <div class="rpe-top"><span>¿Cómo de dura?</span><b id="rpeLbl">${ri.face} ${d.rpe}/10 · ${ri.label}</b></div>
+        <input type="range" id="rpe" min="1" max="10" step="1" value="${d.rpe}">
+        <div class="rpe-scale"><span>😌</span><span>😅</span><span>🥵</span><span>💀</span></div>
+      </div>
+      <textarea id="actNote" rows="3" placeholder="¿Qué os ha hecho hacer hoy? Burpees, kettlebell, comba…">${esc(d.note)}</textarea>
+      <button class="btn big" id="addAct">💀 Sobreviví. Registrar</button>
+    </section>
+
+    ${acts.length ? `
+    <section class="card">
+      <h2>Historial</h2>
+      ${acts.slice(0, 20).map((a, i) => { const p = acts[i + 1]; const l = p ? light(loadOf(a), loadOf(p)) : 'new'; return `
+        <div class="hist-row act">
+          <i class="dot ${l}"></i>
+          <span class="hd">${fmtDayShort(a.day)}</span>
+          <span class="grow"><b>${rpeInfo(a.rpe).face} ${a.rpe}/10</b> · ${a.minutes} min${kcalOf(a) ? ` · ~${kcalOf(a)} kcal` : ''}
+            ${a.note ? `<small class="note">${esc(a.note)}</small>` : ''}</span>
+          <button class="x" data-delact="${a.id}" aria-label="Borrar">✕</button>
+        </div>`; }).join('')}
+    </section>` : ''}
+  `, { back: `#/g/${ex.group}`, nav: 'train' });
+
+  bindSteppers(d);
+  $('#rpe').oninput = (e) => { d.rpe = +e.target.value; const r = rpeInfo(d.rpe); $('#rpeLbl').textContent = `${r.face} ${d.rpe}/10 · ${r.label}`; };
+  $('#actNote').oninput = (e) => (d.note = e.target.value);
+  $('#addAct').onclick = () => {
+    if (!(d.min > 0)) return toast('Pon los minutos 😉');
+    S.addActivity({ user_id: state.userId, exercise_id: ex.id, day: td, minutes: d.min, rpe: d.rpe, note: d.note.trim() });
+    toast(d.rpe >= 9 ? '💀 Pablo 1 – Tú 0. ¡Registrado!' : '🔥 ¡Registrado!');
+    d.note = '';
+  };
+  $$('[data-delact]').forEach((b) => b.onclick = () => {
+    const a = acts.find((x) => x.id === b.dataset.delact);
+    if (a && confirm(`¿Borrar la sesión del ${fmtDayShort(a.day)}?`)) S.deleteActivity(a);
+  });
+}
+
+// ---------------- perfil ----------------
+function renderProfile() {
+  const u = me();
+  const imc = u.weight_kg && u.height_cm ? u.weight_kg / (u.height_cm / 100) ** 2 : null;
+  const imcTxt = !imc ? '' : imc < 18.5 ? 'bajo' : imc < 25 ? 'normal' : imc < 30 ? 'sobrepeso (o mucho músculo 😏)' : 'alto';
+  layout('Mi perfil', `
+    <section class="card profile">
+      <div class="emojis">${EMOJIS.map((e) => `<button type="button" class="emo ${e === u.emoji ? 'on' : ''}" data-e="${e}">${e}</button>`).join('')}</div>
+      <label>Nombre<input id="pName" maxlength="20" value="${esc(u.name)}" autocomplete="off"></label>
+      <div class="two">
+        <label>Peso (kg)<input id="pKg" inputmode="decimal" value="${u.weight_kg ?? ''}" placeholder="80"></label>
+        <label>Altura (cm)<input id="pCm" inputmode="numeric" value="${u.height_cm ?? ''}" placeholder="178"></label>
+      </div>
+      ${imc ? `<p class="muted">IMC ${fmtNum(Math.round(imc * 10) / 10)} · ${imcTxt}</p>` : ''}
+      <p class="muted small">El peso se usa para estimar las kcal. Es una aproximación (±30 %): sin pulsómetro no se puede afinar más.</p>
+      <button class="btn big" id="pSave">Guardar</button>
+    </section>
+    <a class="btn big ghost" href="#/">👥 Cambiar de usuario</a>`, { back: '#/home', nav: null });
+  let emoji = u.emoji;
+  $$('.emo').forEach((b) => b.onclick = () => { emoji = b.dataset.e; $$('.emo').forEach((x) => x.classList.toggle('on', x === b)); });
+  $('#pSave').onclick = () => {
+    const name = $('#pName').value.trim();
+    if (!name) return toast('Ponte un nombre 😅');
+    if (S.getUsers().some((x) => x.id !== u.id && x.name.toLowerCase() === name.toLowerCase())) return toast('Ese nombre ya existe 😅');
+    const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return n > 0 ? n : null; };
+    S.updateUser({ ...u, name, emoji, weight_kg: num($('#pKg').value), height_cm: num($('#pCm').value) });
+    toast('Perfil guardado 💪');
+    go('#/home');
+  };
+}
+
+function bindSteppers(d) {
+  $$('.stp').forEach((b) => b.onclick = () => {
+    const k = b.dataset.k; const inp = $(`#inp-${k}`);
+    const v = Math.max(0, Math.round(((parseFloat(inp.value.replace(',', '.')) || 0) + parseFloat(b.dataset.step)) * 100) / 100);
+    inp.value = v; d[k] = v;
+  });
+  $$('.stp-inp').forEach((inp) => inp.oninput = () => { d[inp.dataset.k] = parseFloat(inp.value.replace(',', '.')) || 0; });
 }
 
 function stepper(k, label, val, step) {
@@ -493,7 +644,7 @@ function renderCalendar() {
   const offset = (first.getDay() + 6) % 7;
   const nDays = new Date(y, m + 1, 0).getDate();
   const byDay = {};
-  sets.forEach((s) => { const g = groupById(exerciseById(s.exercise_id)?.group); if (g) (byDay[s.day] ||= new Set()).add(g.emoji); });
+  [...sets, ...myActs()].forEach((s) => { const g = groupById(exerciseById(s.exercise_id)?.group); if (g) (byDay[s.day] ||= new Set()).add(g.emoji); });
   const cells = [];
   for (let i = 0; i < offset; i++) cells.push('<span class="cd empty"></span>');
   for (let dd = 1; dd <= nDays; dd++) {
@@ -522,9 +673,20 @@ function renderDay(ds) {
   const sets = mySets();
   const daySets = sets.filter((s) => s.day === ds);
   const exIds = [...new Set(daySets.map((s) => s.exercise_id))];
+  const dayActs = myActs().filter((a) => a.day === ds);
+  const eff = effort(daySets, dayActs, me().weight_kg);
   layout(fmtDayShort(ds), `
     <p class="muted center">${fmtDayLong(ds)}</p>
-    ${exIds.length ? exIds.map((id) => {
+    ${exIds.length || dayActs.length ? `<p class="center day-eff">⚡ Carga ${fmtNum(eff.load)} · ⏱️ ~${eff.min} min${eff.kcal !== null ? ` · 🔥 ~${fmtNum(eff.kcal)} kcal` : ''}</p>` : ''}
+    ${dayActs.map((a) => { const ex = exerciseById(a.exercise_id); return !ex ? '' : `
+      <a class="card day-ex" href="#/e/${ex.id}">
+        ${thumb(ex)}
+        <span class="grow"><b>${esc(ex.name)}</b>
+          <small>${a.minutes} min · ${rpeInfo(a.rpe).label}</small>
+          ${a.note ? `<small class="note">${esc(a.note)}</small>` : ''}</span>
+        <span class="face">${rpeInfo(a.rpe).face}</span>
+      </a>`; }).join('')}
+    ${exIds.length || dayActs.length ? exIds.map((id) => {
       const ex = exerciseById(id); if (!ex) return '';
       const ss = sessions(sets, id);
       const i = ss.findIndex((x) => x.day === ds);

@@ -1,6 +1,6 @@
 // Service worker: guarda la app para que abra sin cobertura.
 // Para publicar una versión nueva basta con cambiar VERSION: los móviles mostrarán "Nueva versión disponible".
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `gymbros-${VERSION}`;
 const FILES = [
   './', './index.html', './css/styles.css', './manifest.webmanifest',

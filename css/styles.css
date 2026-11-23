@@ -77,8 +77,8 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .un { font-weight: 700; }
 #newUser { display: flex; flex-direction: column; gap: 12px; }
 #newUser input { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 17px; }
-.emojis { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
-.emo { aspect-ratio: 1; font-size: 22px; background: var(--surface-2); border: 2px solid transparent; border-radius: 10px; cursor: pointer; }
+.emojis { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 6px; }
+.emo { aspect-ratio: 1; min-width: 0; padding: 0; font-size: 20px; line-height: 1; background: var(--surface-2); border: 2px solid transparent; border-radius: 10px; cursor: pointer; }
 .emo.on { border-color: var(--accent); }
 
 /* ---------- panel ---------- */
@@ -112,7 +112,8 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .ex-row, .rank-row, .pr-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
 .ex-row small, .rank-row small { color: var(--muted); display: block; font-size: 12px; }
 .face { font-size: 24px; }
-.rank-row.me { color: var(--accent); }
+.rank-row.mine { color: var(--accent); }
+.rank-row b { white-space: nowrap; }
 .rank-row .pos { width: 26px; text-align: center; font-size: 18px; }
 .pr-card { border-color: var(--yellow); background: linear-gradient(135deg, #2c2508, var(--surface)); }
 .pr-row { justify-content: space-between; }
@@ -124,6 +125,38 @@ h2 small { color: var(--muted); font-weight: 400; font-size: 13px; }
 .pr-bang { width: 22px; height: 22px; font-size: 16px; }
 .pr-tag { padding: 1px 6px; font-size: 11px; }
 @keyframes pulse { 50% { transform: scale(1.15); box-shadow: 0 0 12px var(--yellow); } }
+
+.stats.two { grid-template-columns: 1fr 1fr; }
+.s.link { color: var(--accent); text-decoration: underline; margin-top: 6px; }
+.rank-row small { display: block; }
+.day-eff { font-weight: 700; margin: 0; }
+.note { display: block; color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+
+/* perfil */
+.profile { display: flex; flex-direction: column; gap: 12px; }
+.profile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.profile input { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 17px; color: var(--text); min-width: 0; }
+.profile .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.profile input { width: 100%; }
+.small { font-size: 12px; margin: 0; }
+
+/* HIIT */
+.steppers.one { grid-template-columns: 1fr; }
+.rpe { margin: 4px 0 12px; }
+.rpe-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--muted); font-size: 13px; }
+.rpe-top b { color: var(--text); font-size: 15px; }
+.rpe input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
+.rpe-scale { display: flex; justify-content: space-between; font-size: 18px; padding: 0 2px; }
+.entry textarea { margin-bottom: 12px; }
+.big-face { font-size: 48px; }
+.hist-row.act { align-items: flex-start; }
+.hist-row.act .dot { margin-top: 4px; }
+
+/* salto de peso */
+.step-pick { display: flex; align-items: center; gap: 6px; margin: -2px 0 12px; font-size: 12px; color: var(--muted); }
+.step-pick span { flex: 1; }
+.step-pick button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 4px 9px; font-size: 13px; cursor: pointer; }
+.step-pick button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
 
 /* ---------- grupos y ejercicios ---------- */
 .groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
