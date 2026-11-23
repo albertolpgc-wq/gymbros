@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GymBros</title>
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GymBros">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="view"></div>
+    <div id="mini" class="mini" hidden></div>
+    <nav id="tabs" class="tabs" hidden>
+      <a class="tab" data-tab="home" href="#/home"><span>🏠</span>Inicio</a>
+      <a class="tab" data-tab="train" href="#/train"><span>💪</span>Entrenar</a>
+      <a class="tab" data-tab="cal" href="#/cal"><span>📅</span>Calendario</a>
+      <a class="tab" data-tab="timer" href="#/timer"><span>⏱️</span>Timer</a>
+    </nav>
+  </div>
+  <button id="update" class="update" hidden>✨ Nueva versión disponible · toca para actualizar</button>
+  <div id="toast" class="toast"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
